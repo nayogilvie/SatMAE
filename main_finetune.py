@@ -20,6 +20,7 @@ import timm
 
 
 print(timm.__version__)
+print("This is actually working")
 
 #assert timm.__version__ == "0.3.2"  # version check
 from timm.models.layers import trunc_normal_
@@ -39,6 +40,9 @@ import models_vit_group_channels
 
 from engine_finetune import (train_one_epoch, train_one_epoch_temporal,
                              evaluate, evaluate_temporal)
+                             
+from folder import SegmentationDataset
+import transforms_seg as T_seg
 
 
 def get_args_parser():
@@ -128,6 +132,9 @@ def get_args_parser():
     #                     help='dataset path')
     parser.add_argument('--train_path', default='/home/train_62classes.csv', type=str,
                         help='Train .csv path')
+    parser.add_argument('--train-path', help='train dataset path')
+    parser.add_argument('--val-path', help='validate dataset path')
+    parser.add_argument('--extensions', nargs='+', default='jpg', help='the train image extension')
     parser.add_argument('--test_path', default='/home/val_62classes.csv', type=str,
                         help='Test .csv path')
     parser.add_argument('--dataset_type', default='rgb', choices=['rgb', 'temporal', 'sentinel', 'euro_sat', 'naip'],
@@ -178,6 +185,34 @@ def get_args_parser():
     return parser
 
 
+def load_data(traindir, valdir, **kwargs):
+    """generate the train and val dataloader, you can change this for your specific task
+
+    Args:
+        traindir (str): train dataset dir
+        valdir (str): validation dataset dir
+
+    Returns:
+        tuple: the train dataset and validation dataset
+    """
+    train_transform = T_seg.Compose([
+        T_seg.RandomHorizontalFlip(),
+        T_seg.RandomVerticalFlip(),
+        T_seg.ToTensor(),
+        T_seg.Normalize(),
+    ])
+    val_transform = T_seg.Compose([
+        T_seg.ToTensor(),
+        T_seg.Normalize(),
+    ])
+    #print("I made it this far before segmentation dataset")
+    dataset_train = SegmentationDataset(traindir, extentions=kwargs['extensions'], transforms=train_transform )
+    dataset_val = SegmentationDataset(valdir, extentions=kwargs['extensions'], transforms=val_transform)
+    #dataset_train = SegmentationDataset(traindir, extentions=kwargs['extensions'], )
+    #dataset_val = SegmentationDataset(valdir, extentions=kwargs['extensions'])
+    return dataset_train, dataset_val
+
+
 def main(args):
     misc.init_distributed_mode(args)
 
@@ -192,7 +227,8 @@ def main(args):
     np.random.seed(seed)
 
     cudnn.benchmark = True
-
+    
+    """
     dataset_train = build_fmow_dataset(is_train=True, args=args)
     dataset_val = build_fmow_dataset(is_train=False, args=args)
 
@@ -238,7 +274,14 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=False
     )
-
+    """
+    
+    train_data, val_data = load_data(args.train_path, args.val_path, extensions=args.extensions)
+    #print(train_data)
+    #print(train_data.shape)
+    data_loader_train = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    data_loader_val = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, shuffle=True)
+    
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
