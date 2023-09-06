@@ -279,21 +279,26 @@ class SegmentationDataset(object):
         root (string): root dir of train or validate dataset.
         extensions (tuple or list): extention of training image.
     """
-    def __init__(self, root, extentions=('tif'), transforms=None):
+    def __init__(self, root, extentions=('tif'), transforms=None, size = 256):
         self.root = root
         self.extensions = extentions
         self.transforms = transforms
 
         self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
+        self.mask_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.NEAREST) # Nearest
+        self.img_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.BILINEAR) # Bilinear
 
         self.samples = self._generate_data()
         
     def __getitem__(self, index):
         image_img, label_img = [image_loader(x) for x in self.samples[index]]
-        if self.transforms is not None:
-            image_img, label_img = self.transforms(image_img, label_img)
-            image_img = image_img.permute(1, 0, 2)
-            image_img = self.normalizer(image_img)
+
+        image_img, label_img = self.transforms(image_img, label_img)
+        image_img = image_img.permute(1, 0, 2)
+        image_img = image_img / 255.0
+        image_img = self.normalizer(image_img)
+        image_img = self.img_resizer(image_img)
+        label_img = self.mask_resizer(label_img)
         return image_img, label_img
 
     def _generate_data(self):
@@ -319,11 +324,11 @@ if __name__ == "__main__":
     transform = T_seg.Compose([
         T_seg.ToTensor()
     ])
-    dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform)
+    dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=256)
     data_loader_train = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
 
 
     for i in data_loader_train:
-        print("image_img :", i[0])
+        print("image_img :", i[0].shape)
         print("label_img :", i[1].shape)
         break
