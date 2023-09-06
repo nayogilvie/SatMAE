@@ -3,10 +3,11 @@ import os
 import os.path
 import sys
 from pathlib import Path
-
+import torch
 import torch.utils.data as data
-
+import torchvision
 from utils import default_loader, image_loader
+import transforms_seg as T_seg
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', 'webp']
 
@@ -281,21 +282,22 @@ class SegmentationDataset(object):
     def __init__(self, root, extentions=('tif'), transforms=None):
         self.root = root
         self.extensions = extentions
-        print("I'm in the init")
-        print(self.extensions)
         self.transforms = transforms
 
+        self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
+
         self.samples = self._generate_data()
-        pass
+        
     def __getitem__(self, index):
         image_img, label_img = [image_loader(x) for x in self.samples[index]]
         if self.transforms is not None:
             image_img, label_img = self.transforms(image_img, label_img)
+            image_img = image_img.permute(1, 0, 2)
+            image_img = self.normalizer(image_img)
         return image_img, label_img
 
     def _generate_data(self):
         images = []
-        print("I am generating data")
         for root, _, fnames in sorted(os.walk(os.path.join(self.root, 'image'))):
             for fname in sorted(fnames):
                 if has_file_allowed_extension(fname, self.extensions):
@@ -307,3 +309,21 @@ class SegmentationDataset(object):
 
     def __len__(self):
         return len(self.samples)
+
+
+if __name__ == "__main__":
+    # transform = T_seg.Compose([
+    #     T_seg.ToTensor(),
+    #     T_seg.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5], inplace=False),
+    # ])
+    transform = T_seg.Compose([
+        T_seg.ToTensor()
+    ])
+    dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform)
+    data_loader_train = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
+
+
+    for i in data_loader_train:
+        print("image_img :", i[0])
+        print("label_img :", i[1].shape)
+        break

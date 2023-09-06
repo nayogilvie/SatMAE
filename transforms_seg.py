@@ -74,9 +74,6 @@ class Normalize(object):
         self.inplace = inplace
 
     def __call__(self, tensor, mask):
-        print("In Call for t")
-        print(tensor.shape)
-        print(mask.shape)
         return F.normalize(tensor, self.mean, self.std, self.inplace), mask
 
 

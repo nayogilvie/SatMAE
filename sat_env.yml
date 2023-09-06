@@ -1,4 +1,4 @@
-name: sat_env_1
+name: satmae
 channels:
   - pytorch
   - defaults
