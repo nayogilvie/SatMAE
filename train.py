@@ -8,6 +8,8 @@ from einops import rearrange
 from util.pos_embed import interpolate_pos_embed
 from timm.models.layers import trunc_normal_
 from timm.models.layers import DropPath
+from ignite.engine import Engine
+from ignite.metrics import IoU, Precision, Recall, ConfusionMatrix
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 
@@ -271,7 +273,8 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
 
 def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writer):
     print('\neval epoch {}'.format(epoch))
-    model.eval()
+    model_mae.eval()
+    model_seg.eval()
     recall = Recall(lambda x: (x[0], x[1]))
     precision = Precision(lambda x: (x[0], x[1]))
     #default_evaluator = Engine(lambda x: (x[0], x[1]))
@@ -287,8 +290,10 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     iou = Engine(eval_step)
     metric.attach(iou, 'iou')
     #metric.attach(default_evaluator, 'cm')
+    print("Made it here")
     with torch.no_grad():
         for idx, (inputs, targets) in enumerate(dataloader):
+            print("Made it here 1")
             inputs, targets = inputs.to(device), targets.to(device)
             inputs = inputs.float()
             #targets = targets.type(torch.LongTensor) For CPU
