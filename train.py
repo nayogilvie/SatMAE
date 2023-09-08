@@ -12,7 +12,7 @@ from ignite.engine import Engine
 from ignite.metrics import IoU, Precision, Recall, ConfusionMatrix
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
-
+import os
 import focal_loss
 
 def init_weights(m):
@@ -290,14 +290,13 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     iou = Engine(eval_step)
     metric.attach(iou, 'iou')
     #metric.attach(default_evaluator, 'cm')
-    print("Made it here")
     with torch.no_grad():
         for idx, (inputs, targets) in enumerate(dataloader):
-            print("Made it here 1")
             inputs, targets = inputs.to(device), targets.to(device)
             inputs = inputs.float()
             #targets = targets.type(torch.LongTensor) For CPU
             targets = targets.type(torch.cuda.LongTensor)
+            targets = targets.squeeze(1)
             
             infrared = inputs[:, 3, :, :]
             RGB = inputs[:, :3, :, :]
@@ -309,26 +308,39 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
             mae_output_no_token = mae_output[:, 1:, :]
             
             outputs = model_seg(infrared, mae_output_no_token)
-            loss = criterion(outputs, targets, True)
+            # loss = criterion(outputs, targets, True)
+            # preds_matrix = outputs.argmax(1)
+            # binary_pred_mask = torch.nn.functional.one_hot(preds_matrix, num_classes=5)
+            # binary_target_mask = torch.nn.functional.one_hot(targets, num_classes=5)
+
+            # binary_pred_mask = binary_pred_mask.permute(0,3,1,2)
+            # binary_target_mask = binary_target_mask.permute(0,3,1,2)
+            # print(binary_pred_mask.shape)
+            # print(binary_target_mask.shape)
+
+            # print(targets)
+            # print(binary_target_mask)
+
+
             #print(outputs.size())
-            #preds_matrix = outputs.argmax(1) #I think this makes it so we have only bindary output
-            preds = outputs
+            # preds_matrix = outputs.argmax(1) #I think this makes it so we have only bindary output
+            # preds = outputs
             #print(preds.size())
             #print(preds)
             #print(targets.size())
             #print(targets)
-            precision.update((preds, targets))
-            recall.update((preds, targets))
+            precision.update((outputs, targets))
+            recall.update((outputs, targets))
             #iou.update((preds, targets))
-            confusion_matrix.update((preds, targets))
-            mean_loss.append(loss.item())
+            confusion_matrix.update((outputs, targets))
+            # mean_loss.append(loss.item())
             #print(recall.compute().numpy())
             mean_recall.append(recall.compute().numpy())
             mean_precision.append(precision.compute().numpy())
             #mean_iou.append(iou.compute().numpy())
 
             # print('val-epoch:{} [{}/{}], loss: {:5.3}'.format(epoch, idx + 1, len(dataloader), loss.item()))
-            writer.add_scalar('test/loss', loss.item(), len(dataloader) * epoch + idx)
+            # writer.add_scalar('test/loss', loss.item(), len(dataloader) * epoch + idx)
 
     #mean_precision, mean_recall = np.array(mean_precision).mean(), np.array(mean_recall).mean()
     #mean_iou = (precision.compute().numpy()).mean()
@@ -339,7 +351,7 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     print('precision: {:07.5}, recall: {:07.5}, f1: {:07.5}\n'.format(mean_precision, mean_recall, f1))
     print('Confusion: ')
     print(confusion_matrix.compute().numpy())
-    writer.add_scalar('test/epoch-loss', np.array(mean_loss).mean(), epoch)
+    # writer.add_scalar('test/epoch-loss', np.array(mean_loss).mean(), epoch)
     writer.add_scalar('test/f1', f1, epoch)
     writer.add_scalar('test/precision', mean_precision, epoch)
     writer.add_scalar('test/recall', mean_recall, epoch)
@@ -372,8 +384,8 @@ model = models_vit.__dict__["vit_large_patch16"](
 transform = T_seg.Compose([
      T_seg.ToTensor()
 ])
-train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=img_size)
-val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", extentions = ("tif"), transforms=transform, size=img_size)
+train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform, size=img_size)
+val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform, size=img_size)
 data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=Batch_size, shuffle=True)
 
@@ -393,7 +405,7 @@ model = model.eval()
 megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls).to(device)
 
 # a fake input
-dummy_x = torch.randn(8,4,img_size,img_size).to(device)
+# dummy_x = torch.randn(8,4,img_size,img_size).to(device)
 
 # split the data into infrared and RGB
 # I assume infrared is the first channel infrared+RGB

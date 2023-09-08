@@ -279,10 +279,11 @@ class SegmentationDataset(object):
         root (string): root dir of train or validate dataset.
         extensions (tuple or list): extention of training image.
     """
-    def __init__(self, root, extentions=('tif'), transforms=None, size = 256):
+    def __init__(self, root, mode, extentions=('tif'), transforms=None, size = 256):
         self.root = root
         self.extensions = extentions
         self.transforms = transforms
+        self.mode = mode
 
         self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
         self.mask_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.NEAREST) # Nearest
@@ -298,7 +299,10 @@ class SegmentationDataset(object):
         image_img = image_img / 255.0
         image_img = self.normalizer(image_img)
         image_img = self.img_resizer(image_img)
-        label_img = self.mask_resizer(label_img)
+        if self.mode == "train":
+            label_img = self.mask_resizer(label_img)
+        if self.mode == "val":
+            label_img = self.mask_resizer(label_img.unsqueeze(0))
         return image_img, label_img
 
     def _generate_data(self):

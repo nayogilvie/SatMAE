@@ -46,7 +46,8 @@ class FocalLoss(nn.CrossEntropyLoss):
         #print("Gama: ", self.gamma, " alpha: ", self.alpha)
         loss = torch.pow(1 - input_prob_argmax, self.gamma) * cross_entropy
         #print("Loss: ", loss.size())
-        return torch.mean(loss)
+        # return torch.mean(loss)
+        return torch.mean(cross_entropy)
         #if self.reduction == 'mean':
         #    return torch.mean(loss)
         #elif (self.reduction == 'sum'):
