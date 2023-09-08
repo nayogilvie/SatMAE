@@ -8,6 +8,10 @@ from einops import rearrange
 from util.pos_embed import interpolate_pos_embed
 from timm.models.layers import trunc_normal_
 from timm.models.layers import DropPath
+from torch.utils.tensorboard import SummaryWriter
+import torch.optim as optim
+
+import focal_loss
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
@@ -233,11 +237,117 @@ class MergeSegmentor(nn.Module):
         return mask
 
 
+
+def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimizer, device, writer):
+    print('train epoch {}'.format(epoch))
+    model.train()
+    for idx, (inputs, targets) in enumerate(dataloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        inputs = inputs.float()
+        targets = targets.float()
+        
+        infrared = inputs[:, 3, :, :]
+        RGB = inputs[:, :3, :, :]
+        infrared = infrared.unsqueeze(1)
+        
+        #print("infrared shape: ", infrared.shape)
+        #print("RGB shape: ", RGB.shape)
+        
+        # MAE extract raw feature from RGB
+        with torch.no_grad():
+            mae_output = model_mae(RGB)
+        mae_output_no_token = mae_output[:, 1:, :]
+        
+        outputs = model_seg(infrared, mae_output_no_token)
+        #get loss
+        loss = criterion(outputs, targets)
+        #propogate results
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        #record results
+        print('train-epoch:{} [{}/{}], loss: {:5.3}'.format(epoch, idx+1, len(dataloader), loss.item()))
+        writer.add_scalar('train/loss', loss.item(), len(dataloader)*epoch+idx)
+
+def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writer):
+    print('\neval epoch {}'.format(epoch))
+    model.eval()
+    recall = Recall(lambda x: (x[0], x[1]))
+    precision = Precision(lambda x: (x[0], x[1]))
+    #default_evaluator = Engine(lambda x: (x[0], x[1]))
+    #print(lambda x: (x[0], x[1]))
+    mean_recall = []
+    mean_precision = []
+    mean_loss = []
+    mean_iou = []
+    confusion_matrix = ConfusionMatrix(num_classes=5)
+    metric = IoU(confusion_matrix)
+    def eval_step(engine, batch):
+        return batch
+    iou = Engine(eval_step)
+    metric.attach(iou, 'iou')
+    #metric.attach(default_evaluator, 'cm')
+    with torch.no_grad():
+        for idx, (inputs, targets) in enumerate(dataloader):
+            inputs, targets = inputs.to(device), targets.to(device)
+            inputs = inputs.float()
+            #targets = targets.type(torch.LongTensor) For CPU
+            targets = targets.type(torch.cuda.LongTensor)
+            
+            infrared = inputs[:, 3, :, :]
+            RGB = inputs[:, :3, :, :]
+            infrared = infrared.unsqueeze(1)
+            
+            # MAE extract raw feature from RGB
+            with torch.no_grad():
+                mae_output = model_mae(RGB)
+            mae_output_no_token = mae_output[:, 1:, :]
+            
+            outputs = model_seg(infrared, mae_output_no_token)
+            loss = criterion(outputs, targets, True)
+            #print(outputs.size())
+            #preds_matrix = outputs.argmax(1) #I think this makes it so we have only bindary output
+            preds = outputs
+            #print(preds.size())
+            #print(preds)
+            #print(targets.size())
+            #print(targets)
+            precision.update((preds, targets))
+            recall.update((preds, targets))
+            #iou.update((preds, targets))
+            confusion_matrix.update((preds, targets))
+            mean_loss.append(loss.item())
+            #print(recall.compute().numpy())
+            mean_recall.append(recall.compute().numpy())
+            mean_precision.append(precision.compute().numpy())
+            #mean_iou.append(iou.compute().numpy())
+
+            # print('val-epoch:{} [{}/{}], loss: {:5.3}'.format(epoch, idx + 1, len(dataloader), loss.item()))
+            writer.add_scalar('test/loss', loss.item(), len(dataloader) * epoch + idx)
+
+    #mean_precision, mean_recall = np.array(mean_precision).mean(), np.array(mean_recall).mean()
+    #mean_iou = (precision.compute().numpy()).mean()
+    mean_precision, mean_recall = (precision.compute().numpy()).mean(), (recall.compute().numpy()).mean()
+    f1 = mean_precision * mean_recall * 2 / (mean_precision + mean_recall + 1e-20)
+
+    #print('epoch-loss: {:07.5}, miou: {:07.5} \n'.format(np.array(mean_loss).mean(), mean_iou))
+    print('precision: {:07.5}, recall: {:07.5}, f1: {:07.5}\n'.format(mean_precision, mean_recall, f1))
+    print('Confusion: ')
+    print(confusion_matrix.compute().numpy())
+    writer.add_scalar('test/epoch-loss', np.array(mean_loss).mean(), epoch)
+    writer.add_scalar('test/f1', f1, epoch)
+    writer.add_scalar('test/precision', mean_precision, epoch)
+    writer.add_scalar('test/recall', mean_recall, epoch)
+    writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
+
+total_epochs = 4
 Batch_size = 8
 img_size = 256
 embed_dim = 512
 num_heads = 4
 n_cls = 5
+lrate = 0.001
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -254,11 +364,13 @@ model = models_vit.__dict__["vit_large_patch16"](
     )
 
 # dataset is here
-# transform = T_seg.Compose([
-#     T_seg.ToTensor()
-# ])
-# train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=img_size)
-# data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
+transform = T_seg.Compose([
+     T_seg.ToTensor()
+])
+train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=img_size)
+val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", extentions = ("tif"), transforms=transform, size=img_size)
+data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
+val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=Batch_size, shuffle=True)
 
 
 checkpoint = torch.load("fmow_pretrain.pth", map_location='cpu')
@@ -280,23 +392,31 @@ dummy_x = torch.randn(8,4,img_size,img_size).to(device)
 
 # split the data into infrared and RGB
 # I assume infrared is the first channel infrared+RGB
-infrared = dummy_x[:, 0, :, :]
-RGB = dummy_x[:, 1:, :, :]
-infrared = infrared.unsqueeze(1)
+#infrared = dummy_x[:, 3, :, :]
+#RGB = dummy_x[:, :3, :, :]
+#infrared = infrared.unsqueeze(1)
 
-# MAE extract raw feature from RGB
-with torch.no_grad():
-    mae_output = model(RGB)
-mae_output_no_token = mae_output[:, 1:, :]
+
 
 # segment model takes input of infrared data and raw feature 
 # Then predict the segmentation map
-seg_output = megSeg(infrared, mae_output_no_token)
+#seg_output = megSeg(infrared, mae_output_no_token)
 
-print("seg model output shape:", seg_output.shape)
+#print("seg model output shape:", seg_output.shape)
 
+criterion = focal_loss.FocalLoss(0.75).to(device)
+# optim and lr scheduler
+optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
+# lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
-# TODO: 
-# 1. use argmax to obtain the 1 hot encoding result from seg_output
-# 2. finish the training loop with a loss function from Unet baseline
-# 3. experiment with different parameters.
+#obtain one hot encoding
+
+writer = SummaryWriter("./output/")
+#get loss function from that
+for epoch in range(total_epochs):
+        writer.add_scalar('train/lr', lr_scheduler.get_lr()[0], epoch)
+        train_one_epoch(epoch, data_loader_train, model, megSeg, criterion, optimizer, device, writer)
+        evalidation(epoch, val_loader, model, megSeg, criterion, device, writer)
+        lr_scheduler.step()
+        torch.save(model.state_dict(), os.path.join("./output/", 'cls_epoch_{}.pth'.format(epoch)))
