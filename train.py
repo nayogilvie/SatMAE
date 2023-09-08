@@ -294,3 +294,9 @@ mae_output_no_token = mae_output[:, 1:, :]
 seg_output = megSeg(infrared, mae_output_no_token)
 
 print("seg model output shape:", seg_output.shape)
+
+
+# TODO: 
+# 1. use argmax to obtain the 1 hot encoding result from seg_output
+# 2. finish the training loop with a loss function from Unet baseline
+# 3. experiment with different parameters.
