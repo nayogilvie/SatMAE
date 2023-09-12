@@ -190,7 +190,7 @@ class Block(nn.Module):
 
 
 class MergeSegmentor(nn.Module):
-    def __init__(self, embed_dim = 512, num_heads = 4, n_cls = 5):
+    def __init__(self, embed_dim = 512, num_heads = 4, n_cls = 5, n_layers=4):
         super().__init__()
         self.infrared_branch = nn.Sequential(
             nn.Conv2d(1,16,kernel_size=3,padding=1),
@@ -222,7 +222,7 @@ class MergeSegmentor(nn.Module):
 
         self.merger = nn.MultiheadAttention(embed_dim, num_heads, dropout=0.1, batch_first=True)
 
-        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, 4, num_heads, embed_dim, embed_dim,0.1,0.1)
+        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, n_layers, num_heads, embed_dim, embed_dim,0.1,0.1)
 
     def forward(self, x, mae_features):
         x = self.infrared_branch(x)
@@ -236,6 +236,7 @@ class MergeSegmentor(nn.Module):
 
         merge_feature, merge_feature_weights = self.merger(query=query, key=key, value=value)
         mask = self.segmentor(merge_feature, (256,256))
+        # mask_with_prob = torch.nn.functional.softmax(mask, dim=1)
 
         return mask
 
@@ -361,6 +362,7 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     writer.add_scalar('test/recall', mean_recall, epoch)
     writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
 
+<<<<<<< HEAD
 total_epochs = 100
 Batch_size = 16
 img_size = 256
@@ -369,6 +371,17 @@ num_heads = 8
 n_cls = 5
 lrate = 0.01
 csv_file = "./output/epoch_100_img_256_emd_512_head_8_lrte_001.csv"
+=======
+total_epochs = 10
+Batch_size = 8
+img_size = 256
+embed_dim = 1024
+num_heads = 8
+n_cls = 5
+lrate = 0.01
+layers = 8
+
+>>>>>>> c065a9d48f5d4362156589ab467bb9dab9589b41
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -406,7 +419,7 @@ print(msg)
 model = model.to(device)
 model = model.eval()
 
-megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls).to(device)
+megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(device)
 
 # a fake input
 # dummy_x = torch.randn(8,4,img_size,img_size).to(device)
@@ -425,11 +438,15 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls).to(device)
 
 #print("seg model output shape:", seg_output.shape)
 
-criterion = focal_loss.FocalLoss(0.75).to(device)
+criterion = focal_loss.FocalLoss(4.0).to(device)
 # optim and lr scheduler
 optimizer = optim.Adam(megSeg.parameters(), lr=lrate, weight)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
+<<<<<<< HEAD
 lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
+=======
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
+>>>>>>> c065a9d48f5d4362156589ab467bb9dab9589b41
 
 #obtain one hot encoding
 
