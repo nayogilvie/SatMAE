@@ -14,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import os
 import focal_loss
+import csv
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
@@ -271,7 +272,7 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
         print('train-epoch:{} [{}/{}], loss: {:5.3}'.format(epoch, idx+1, len(dataloader), loss.item()))
         writer.add_scalar('train/loss', loss.item(), len(dataloader)*epoch+idx)
 
-def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writer):
+def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writer, csv_file):
     print('\neval epoch {}'.format(epoch))
     model_mae.eval()
     model_seg.eval()
@@ -351,20 +352,23 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     print('precision: {:07.5}, recall: {:07.5}, f1: {:07.5}\n'.format(mean_precision, mean_recall, f1))
     print('Confusion: ')
     print(confusion_matrix.compute().numpy())
+    with open(csv_file, "ab") as f:
+        f.write(b"\n")
+        np.savetxt(f, confusion_matrix.compute().numpy(), delimiter=',')
     # writer.add_scalar('test/epoch-loss', np.array(mean_loss).mean(), epoch)
     writer.add_scalar('test/f1', f1, epoch)
     writer.add_scalar('test/precision', mean_precision, epoch)
     writer.add_scalar('test/recall', mean_recall, epoch)
     writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
 
-total_epochs = 4
-Batch_size = 8
+total_epochs = 100
+Batch_size = 16
 img_size = 256
 embed_dim = 512
-num_heads = 4
+num_heads = 8
 n_cls = 5
-lrate = 0.001
-
+lrate = 0.01
+csv_file = "./output/epoch_100_img_256_emd_512_head_8_lrte_001.csv"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -423,9 +427,9 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls).to(device)
 
 criterion = focal_loss.FocalLoss(0.75).to(device)
 # optim and lr scheduler
-optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
+optimizer = optim.Adam(megSeg.parameters(), lr=lrate, weight)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
 
 #obtain one hot encoding
 
@@ -434,6 +438,6 @@ writer = SummaryWriter("./output/")
 for epoch in range(total_epochs):
         writer.add_scalar('train/lr', lr_scheduler.get_lr()[0], epoch)
         train_one_epoch(epoch, data_loader_train, model, megSeg, criterion, optimizer, device, writer)
-        evalidation(epoch, val_loader, model, megSeg, criterion, device, writer)
+        evalidation(epoch, val_loader, model, megSeg, criterion, device, writer, csv_file)
         lr_scheduler.step()
-        torch.save(model.state_dict(), os.path.join("./output/", 'cls_epoch_{}.pth'.format(epoch)))
+        torch.save(model.state_dict(), os.path.join("./output/", 'cls_head_8_epoch_{}.pth'.format(epoch)))
