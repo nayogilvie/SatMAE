@@ -286,7 +286,8 @@ class SegmentationDataset(object):
         self.transforms = transforms
         self.mode = mode
 
-        self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
+        self.normalizer = torchvision.transforms.Normalize(mean=[0.4182007312774658, 0.4214799106121063, 0.3991275727748871, 0.5], std=[0.28774282336235046, 0.27541765570640564, 0.2764017581939697, 0.5])
+        # self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
         self.color_jitter = torchvision.transforms.ColorJitter(0.2, 0.2, 0.2, 0.2)
         # self.mask_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.NEAREST) # Nearest
         # self.img_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.BILINEAR) # Bilinear
@@ -307,11 +308,10 @@ class SegmentationDataset(object):
         if self.mode == "train":
             label_img = label_img.permute(2, 1, 0)
 
+        image_img = image_img / 255.0
         # only jitter RGB
         if self.mode == "train":
             image_img[0:3] = self.color_jitter(image_img[0:3])
-
-        image_img = image_img / 255.0
         image_img = self.normalizer(image_img)
 
         if self.mode == "val":
@@ -340,13 +340,21 @@ if __name__ == "__main__":
     #     T_seg.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5], inplace=False),
     # ])
     transform = T_seg.Compose([
+        T_seg.RandomRotation(degrees=20),
+        T_seg.RandomHorizontalFlip(),
+        T_seg.RandomVerticalFlip(),
+        T_seg.RandomResizedCrop(crop_size=int(256*0.6), target_size=256),
         T_seg.ToTensor()
     ])
-    dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=256)
+    transform_val = T_seg.Compose([
+        T_seg.ToTensor()
+    ])
+    dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", extentions = ("tif"), transforms=transform, size=256, mode = "train")
     data_loader_train = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
 
 
     for i in data_loader_train:
         print("image_img :", i[0].shape)
         print("label_img :", i[1].shape)
+        torchvision.utils.save_image((i[0][:, 0:3, :, :]), "test.png")
         break

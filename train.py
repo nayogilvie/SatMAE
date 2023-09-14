@@ -190,7 +190,7 @@ class Block(nn.Module):
 
 
 class MergeSegmentor(nn.Module):
-    def __init__(self, embed_dim = 512, num_heads = 4, n_cls = 5, n_layers=4):
+    def __init__(self, embed_dim = 512, num_heads = 4, n_cls = 5, n_layers=4, img_size = 256):
         super().__init__()
         self.infrared_branch = nn.Sequential(
             nn.Conv2d(1,16,kernel_size=3,padding=1),
@@ -220,9 +220,11 @@ class MergeSegmentor(nn.Module):
         self.k_matrix = nn.Linear(1024,embed_dim)
         self.v_matrix = nn.Linear(1024,embed_dim)
 
-        self.merger = nn.MultiheadAttention(embed_dim, num_heads, dropout=0.1, batch_first=True)
+        self.img_size = img_size
 
-        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, n_layers, num_heads, embed_dim, embed_dim,0.1,0.1)
+        self.merger = nn.MultiheadAttention(embed_dim, num_heads, dropout=0.3, batch_first=True)
+
+        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, n_layers, num_heads, embed_dim, embed_dim, 0.3, 0.3)
 
     def forward(self, x, mae_features):
         x = self.infrared_branch(x)
@@ -235,7 +237,7 @@ class MergeSegmentor(nn.Module):
         value = self.v_matrix(mae_features)
 
         merge_feature, merge_feature_weights = self.merger(query=query, key=key, value=value)
-        mask = self.segmentor(merge_feature, (512,512))
+        mask = self.segmentor(merge_feature, (self.img_size,self.img_size))
         # mask_with_prob = torch.nn.functional.softmax(mask, dim=1)
 
         return mask
@@ -258,8 +260,9 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
         #print("RGB shape: ", RGB.shape)
         
         # MAE extract raw feature from RGB
-        with torch.no_grad():
-            mae_output = model_mae(RGB)
+        # with torch.no_grad():
+        mae_output = model_mae(RGB)
+
         mae_output_no_token = mae_output[:, 1:, :]
         
         outputs = model_seg(infrared, mae_output_no_token)
@@ -368,7 +371,7 @@ csv_file = "./output/test_4_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img
 total_epochs = 100
 Batch_size = 12
 #Test with 512 at later time
-img_size = 512
+img_size = 256
 embed_dim = 1024
 num_heads = 8
 n_cls = 5
@@ -385,8 +388,9 @@ model = models_vit.__dict__["vit_large_patch16"](
     patch_size=16, 
     img_size=img_size, 
     in_chans=3,
-    num_classes=-1, 
-    drop_path_rate=0.1, 
+    num_classes=-1,
+    drop_rate = 0.3, 
+    drop_path_rate=0.3, 
     global_pool=False,
     )
 
@@ -433,9 +437,9 @@ msg = model.load_state_dict(checkpoint_model, strict=False)
 print(msg)
 
 model = model.to(device)
-model = model.eval()
+# model = model.eval()
 
-megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(device)
+megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers, img_size = img_size).to(device)
 
 # a fake input
 # dummy_x = torch.randn(8,4,img_size,img_size).to(device)
@@ -452,7 +456,8 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 
 #print("seg model output shape:", seg_output.shape)
 
-#criterion = focal_loss.FocalLoss(0.75).to(device)
+non_linear_func = torch.nn.functional.softmax
+criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, reduction='mean').to(device)
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 2.0, 1.0, 0.5])).to(device)
 #Add inverse weights of total data
 #test 1
@@ -460,14 +465,13 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 #test 2
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 1.5])).to(device)
 #test 4
-criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 2])).to(device)
+# criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 2])).to(device)
 #Try this in seperate experiment for added cat 3 weight
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 344.82, 10.82, 1.42])).to(device)
 #criterion = nn.CrossEntropyLoss().to(device)
-=======
 #criterion = focal_loss.FocalLoss(1.0).to(device)
 # optim and lr scheduler
-optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
+optimizer = optim.Adam(list(megSeg.parameters()) + list(model.parameters()), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
 
 lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
