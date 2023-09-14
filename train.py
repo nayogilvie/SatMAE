@@ -364,7 +364,7 @@ img_size = 256
 embed_dim = 1024
 num_heads = 8
 n_cls = 5
-lrate = 0.01
+lrate = 0.001
 layers = 8
 
 
@@ -383,11 +383,21 @@ model = models_vit.__dict__["vit_large_patch16"](
     )
 
 # dataset is here
-transform = T_seg.Compose([
-     T_seg.ToTensor()
+transform_train = T_seg.Compose([
+    T_seg.RandomRotation(degrees=20),
+    T_seg.RandomHorizontalFlip(),
+    T_seg.RandomVerticalFlip(),
+    T_seg.RandomResizedCrop(crop_size=int(img_size*0.6), target_size=img_size),
+    T_seg.ToTensor()
 ])
-train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform, size=img_size)
-val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform, size=img_size)
+
+transform_test = T_seg.Compose([
+    T_seg.Resize(size=img_size),
+    T_seg.ToTensor()
+])
+
+train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform_train, size=img_size)
+val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform_test, size=img_size)
 data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=Batch_size, shuffle=True)
 
@@ -415,15 +425,13 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 #RGB = dummy_x[:, :3, :, :]
 #infrared = infrared.unsqueeze(1)
 
-
-
 # segment model takes input of infrared data and raw feature 
 # Then predict the segmentation map
 #seg_output = megSeg(infrared, mae_output_no_token)
 
 #print("seg model output shape:", seg_output.shape)
 
-criterion = focal_loss.FocalLoss(4.0).to(device)
+criterion = focal_loss.FocalLoss(1.0).to(device)
 # optim and lr scheduler
 optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)

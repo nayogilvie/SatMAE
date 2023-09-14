@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 import torch.utils.data as data
 import torchvision
+import numpy as np
 from utils import default_loader, image_loader
 import transforms_seg as T_seg
 
@@ -286,23 +287,36 @@ class SegmentationDataset(object):
         self.mode = mode
 
         self.normalizer = torchvision.transforms.Normalize(mean=[0.5, 0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5, 0.5])
-        self.mask_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.NEAREST) # Nearest
-        self.img_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.BILINEAR) # Bilinear
+        self.color_jitter = torchvision.transforms.ColorJitter(0.2, 0.2, 0.2, 0.2)
+        # self.mask_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.NEAREST) # Nearest
+        # self.img_resizer = torchvision.transforms.Resize(size, interpolation=torchvision.transforms.InterpolationMode.BILINEAR) # Bilinear
 
         self.samples = self._generate_data()
         
     def __getitem__(self, index):
         image_img, label_img = [image_loader(x) for x in self.samples[index]]
+        if self.mode == "train":
+            image_img = np.transpose(image_img, (1, 2, 0))
+            label_img = np.transpose(label_img, (1, 2, 0))
+        else:
+            image_img = np.transpose(image_img, (1, 2, 0))
 
         image_img, label_img = self.transforms(image_img, label_img)
-        image_img = image_img.permute(1, 0, 2)
+
+        # image_img = image_img.permute(2, 1, 0)
+        if self.mode == "train":
+            label_img = label_img.permute(2, 1, 0)
+
+        # only jitter RGB
+        if self.mode == "train":
+            image_img[0:3] = self.color_jitter(image_img[0:3])
+
         image_img = image_img / 255.0
         image_img = self.normalizer(image_img)
-        image_img = self.img_resizer(image_img)
-        if self.mode == "train":
-            label_img = self.mask_resizer(label_img)
+
         if self.mode == "val":
-            label_img = self.mask_resizer(label_img.unsqueeze(0))
+            # label_img = self.mask_resizer(label_img.unsqueeze(0))
+            label_img = label_img.unsqueeze(0)
         return image_img, label_img
 
     def _generate_data(self):
