@@ -363,16 +363,16 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
 
 
-csv_file = "./output/test_4_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img_256_emd_1024_head_8_lrte_001.csv"
+csv_file = "./output/cross_unweighted_epoch_400_step_5_img_512_emd_1024_head_8.csv"
 
-total_epochs = 100
-Batch_size = 12
+total_epochs = 400
+Batch_size = 16
 #Test with 512 at later time
 img_size = 512
 embed_dim = 1024
 num_heads = 8
 n_cls = 5
-lrate = 0.001
+lrate = 0.01
 layers = 8
 
 
@@ -391,7 +391,7 @@ model = models_vit.__dict__["vit_large_patch16"](
     )
 
 # dataset is here
-"""
+#TODO Add random rotation and flip, random masking out some area?
 transform_train = T_seg.Compose([
      T_seg.RandomHorizontalFlip(),
      T_seg.RandomVerticalFlip(),
@@ -402,23 +402,6 @@ transform_val = T_seg.Compose([
 ])
 train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform_train, size=img_size)
 val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform_val, size=img_size)
-"""
-transform_train = T_seg.Compose([
-    T_seg.RandomRotation(degrees=20),
-    T_seg.RandomHorizontalFlip(),
-    T_seg.RandomVerticalFlip(),
-    T_seg.RandomResizedCrop(crop_size=int(img_size*0.6), target_size=img_size),
-    T_seg.ToTensor()
-])
-
-transform_test = T_seg.Compose([
-    T_seg.Resize(size=img_size),
-    T_seg.ToTensor()
-])
-
-train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform_train, size=img_size)
-val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform_test, size=img_size)
-
 data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=Batch_size, shuffle=True)
 
@@ -446,6 +429,8 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 #RGB = dummy_x[:, :3, :, :]
 #infrared = infrared.unsqueeze(1)
 
+
+
 # segment model takes input of infrared data and raw feature 
 # Then predict the segmentation map
 #seg_output = megSeg(infrared, mae_output_no_token)
@@ -455,22 +440,18 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 #criterion = focal_loss.FocalLoss(0.75).to(device)
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 2.0, 1.0, 0.5])).to(device)
 #Add inverse weights of total data
-#test 1
+#test 1 didn't work too much for cat 1
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 15.0, 10.82, 1.42])).to(device)
-#test 2
+#test
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 1.5])).to(device)
-#test 4
-criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 2])).to(device)
 #Try this in seperate experiment for added cat 3 weight
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 344.82, 10.82, 1.42])).to(device)
-#criterion = nn.CrossEntropyLoss().to(device)
-=======
-#criterion = focal_loss.FocalLoss(1.0).to(device)
+criterion = nn.CrossEntropyLoss().to(device)
 # optim and lr scheduler
 optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
 
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
 
 #obtain one hot encoding
@@ -482,4 +463,4 @@ for epoch in range(total_epochs):
         train_one_epoch(epoch, data_loader_train, model, megSeg, criterion, optimizer, device, writer)
         evalidation(epoch, val_loader, model, megSeg, criterion, device, writer, csv_file)
         lr_scheduler.step()
-        torch.save(model.state_dict(), os.path.join("./output/", 'cls_drop_0.3_weighted_inverse_test4_img_256_emd_1024_head_8_epoch_{}.pth'.format(epoch)))
+        torch.save(model.state_dict(), os.path.join("./output/", 'cls_unweighted_test2_img_512_emd_1024_head_8_epoch_{}.pth'.format(epoch)))
