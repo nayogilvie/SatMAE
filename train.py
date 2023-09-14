@@ -235,7 +235,7 @@ class MergeSegmentor(nn.Module):
         value = self.v_matrix(mae_features)
 
         merge_feature, merge_feature_weights = self.merger(query=query, key=key, value=value)
-        mask = self.segmentor(merge_feature, (256,256))
+        mask = self.segmentor(merge_feature, (512,512))
         # mask_with_prob = torch.nn.functional.softmax(mask, dim=1)
 
         return mask
@@ -362,26 +362,19 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     writer.add_scalar('test/recall', mean_recall, epoch)
     writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
 
-<<<<<<< HEAD
+
+csv_file = "./output/test_4_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img_256_emd_1024_head_8_lrte_001.csv"
+
 total_epochs = 100
-Batch_size = 16
-img_size = 256
-embed_dim = 512
-num_heads = 8
-n_cls = 5
-lrate = 0.01
-csv_file = "./output/epoch_100_img_256_emd_512_head_8_lrte_001.csv"
-=======
-total_epochs = 10
-Batch_size = 8
-img_size = 256
+Batch_size = 12
+#Test with 512 at later time
+img_size = 512
 embed_dim = 1024
 num_heads = 8
 n_cls = 5
-lrate = 0.01
+lrate = 0.001
 layers = 8
 
->>>>>>> c065a9d48f5d4362156589ab467bb9dab9589b41
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -398,11 +391,17 @@ model = models_vit.__dict__["vit_large_patch16"](
     )
 
 # dataset is here
-transform = T_seg.Compose([
-     T_seg.ToTensor()
+#TODO Add random rotation and flip, random masking out some area?
+transform_train = T_seg.Compose([
+     T_seg.RandomHorizontalFlip(),
+     T_seg.RandomVerticalFlip(),
+     T_seg.ToTensor(),
 ])
-train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform, size=img_size)
-val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform, size=img_size)
+transform_val = T_seg.Compose([
+     T_seg.ToTensor(),
+])
+train_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/train", mode="train", extentions = ("tif"), transforms=transform_train, size=img_size)
+val_dataset = SegmentationDataset(root = "/users/n/o/nogilvie/scratch/pytorch_2/cdata_overlap/val", mode="val", extentions = ("tif"), transforms=transform_val, size=img_size)
 data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=Batch_size, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=Batch_size, shuffle=True)
 
@@ -438,15 +437,24 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers).to(de
 
 #print("seg model output shape:", seg_output.shape)
 
-criterion = focal_loss.FocalLoss(4.0).to(device)
+#criterion = focal_loss.FocalLoss(0.75).to(device)
+#criterion = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 2.0, 1.0, 0.5])).to(device)
+#Add inverse weights of total data
+#test 1
+#criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 15.0, 10.82, 1.42])).to(device)
+#test 2
+#criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 1.5])).to(device)
+#test 4
+criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 2])).to(device)
+#Try this in seperate experiment for added cat 3 weight
+#criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 344.82, 10.82, 1.42])).to(device)
+#criterion = nn.CrossEntropyLoss().to(device)
 # optim and lr scheduler
-optimizer = optim.Adam(megSeg.parameters(), lr=lrate, weight)
+optimizer = optim.Adam(megSeg.parameters(), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
-<<<<<<< HEAD
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.1)
-=======
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
->>>>>>> c065a9d48f5d4362156589ab467bb9dab9589b41
+
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+
 
 #obtain one hot encoding
 
@@ -457,4 +465,4 @@ for epoch in range(total_epochs):
         train_one_epoch(epoch, data_loader_train, model, megSeg, criterion, optimizer, device, writer)
         evalidation(epoch, val_loader, model, megSeg, criterion, device, writer, csv_file)
         lr_scheduler.step()
-        torch.save(model.state_dict(), os.path.join("./output/", 'cls_head_8_epoch_{}.pth'.format(epoch)))
+        torch.save(model.state_dict(), os.path.join("./output/", 'cls_drop_0.3_weighted_inverse_test4_img_256_emd_1024_head_8_epoch_{}.pth'.format(epoch)))
