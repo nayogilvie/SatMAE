@@ -220,11 +220,36 @@ class MergeSegmentor(nn.Module):
         self.k_matrix = nn.Linear(1024,embed_dim)
         self.v_matrix = nn.Linear(1024,embed_dim)
 
+        # self.q_matrix = nn.Sequential(
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(1024,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(embed_dim,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        # )
+        # self.k_matrix = nn.Sequential(
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(embed_dim,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(embed_dim,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        # )
+        # self.v_matrix = nn.Sequential(
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(1024,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        #     nn.Upsample(scale_factor=2, mode='bilinear'),
+        #     nn.Conv2d(embed_dim,embed_dim,kernel_size=3,padding=1),
+        #     nn.ReLU(),
+        # )
+
         self.img_size = img_size
 
-        self.merger = nn.MultiheadAttention(embed_dim, num_heads, dropout=0.3, batch_first=True)
+        self.merger = nn.MultiheadAttention(embed_dim, num_heads, dropout=0.1, batch_first=True)
 
-        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, n_layers, num_heads, embed_dim, embed_dim, 0.3, 0.3)
+        self.segmentor = MaskTransformer(n_cls, 16, embed_dim, n_layers, num_heads, embed_dim, embed_dim, 0.1, 0.1)
 
     def forward(self, x, mae_features):
         x = self.infrared_branch(x)
@@ -232,9 +257,16 @@ class MergeSegmentor(nn.Module):
         x = x.view(B,C,H*W)
         infrared_features = x.permute(0,2,1)
 
+        # mae_features = rearrange(mae_features, "b (h w) n -> b n h w", h=16)
+        # infrared_features = rearrange(infrared_features, "b (h w) n -> b n h w", h=16)
+
         query = self.q_matrix(mae_features)
         key = self.k_matrix(infrared_features)
         value = self.v_matrix(mae_features)
+
+        # query = rearrange(query, "b n h w -> b (h w) n")
+        # key = rearrange(key, "b n h w -> b (h w) n")
+        # value = rearrange(value, "b n h w -> b (h w) n")
 
         merge_feature, merge_feature_weights = self.merger(query=query, key=key, value=value)
         mask = self.segmentor(merge_feature, (self.img_size,self.img_size))
@@ -261,6 +293,8 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
         
         # MAE extract raw feature from RGB
         # with torch.no_grad():
+        #     mae_output = model_mae(RGB)
+
         mae_output = model_mae(RGB)
 
         mae_output_no_token = mae_output[:, 1:, :]
@@ -369,14 +403,14 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
 csv_file = "./output/test_4_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img_256_emd_1024_head_8_lrte_001.csv"
 
 total_epochs = 100
-Batch_size = 12
+Batch_size = 2
 #Test with 512 at later time
 img_size = 256
-embed_dim = 1024
-num_heads = 8
+embed_dim = 768
+num_heads = 12
 n_cls = 5
-lrate = 0.001
-layers = 8
+lrate = 0.0001
+layers = 12
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -389,8 +423,8 @@ model = models_vit.__dict__["vit_large_patch16"](
     img_size=img_size, 
     in_chans=3,
     num_classes=-1,
-    drop_rate = 0.3, 
-    drop_path_rate=0.3, 
+    drop_rate = 0.2, 
+    drop_path_rate=0.2, 
     global_pool=False,
     )
 
@@ -457,7 +491,7 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers, img_s
 #print("seg model output shape:", seg_output.shape)
 
 non_linear_func = torch.nn.functional.softmax
-criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, reduction='mean').to(device)
+criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, reduction='sum').to(device)
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 2.0, 1.0, 0.5])).to(device)
 #Add inverse weights of total data
 #test 1
@@ -471,10 +505,11 @@ criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, 
 #criterion = nn.CrossEntropyLoss().to(device)
 #criterion = focal_loss.FocalLoss(1.0).to(device)
 # optim and lr scheduler
-optimizer = optim.Adam(list(megSeg.parameters()) + list(model.parameters()), lr=lrate)
+optimizer = optim.AdamW(list(megSeg.parameters()) + list(model.parameters()), lr=lrate)
+# optimizer = optim.AdamW(megSeg.parameters(), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
 
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
 
 
 #obtain one hot encoding

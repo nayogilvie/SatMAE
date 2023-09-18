@@ -86,6 +86,8 @@ class FocalLoss(nn.Module):
                 loss = loss.sum() / valid_mask.sum()
         elif self.reduction == 'none':
             loss = loss.view(ori_shp)
+        elif self.reduction == 'sum':
+            loss = loss.sum()
         return loss
 
         
