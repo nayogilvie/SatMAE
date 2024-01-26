@@ -280,9 +280,10 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
     print('train epoch {}'.format(epoch))
     model.train()
     for idx, (inputs, targets) in enumerate(dataloader):
+        targets = torch.argmax(targets, dim=1)
         inputs, targets = inputs.to(device), targets.to(device)
         inputs = inputs.float()
-        targets = targets.float()
+        #targets = targets.float()
         
         infrared = inputs[:, 3, :, :]
         RGB = inputs[:, :3, :, :]
@@ -301,10 +302,27 @@ def train_one_epoch(epoch, dataloader, model_mae, model_seg, criterion, optimize
         
         outputs = model_seg(infrared, mae_output_no_token)
         #get loss
+        #print("get lost")
+        #print(outputs.type())
+        #print(outputs)
+        #print(targets.type())
+        #print(targets)
+        #print(targets.size())
+        #print(outputs.size())
+        #outputs = outputs.to(nn.int())
+        #targets = targets.int()
+        #print("get lost after")
+        #print(outputs.type())
+        #print(outputs)
+        #print(targets.type())
+        #print(targets)
+        #print(targets.size())
+        #print(outputs.size())
         loss = criterion(outputs, targets)
         #propogate results
         optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(model_seg.parameters(), 1.0)
         optimizer.step()
         #record results
         print('train-epoch:{} [{}/{}], loss: {:5.3}'.format(epoch, idx+1, len(dataloader), loss.item()))
@@ -337,8 +355,8 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
             targets = targets.type(torch.cuda.LongTensor)
             targets = targets.squeeze(1)
             
-            infrared = inputs[:, 3, :, :]
-            RGB = inputs[:, :3, :, :]
+            infrared = inputs[:, 0, :, :]
+            RGB = inputs[:, 1:, :, :]
             infrared = infrared.unsqueeze(1)
             
             # MAE extract raw feature from RGB
@@ -400,17 +418,19 @@ def evalidation(epoch, dataloader, model_mae, model_seg, criterion, device, writ
     writer.add_scalar('test/recall2', (recall.compute().numpy()).mean(), epoch)
 
 
-csv_file = "./output/test_4_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img_256_emd_1024_head_8_lrte_001.csv"
+csv_file = "./output/test_5_cross_drop_0.1_weighted_inverse_epoch_100_step_5_img_256_emd_1024_head_8_lrte_001.csv"
 
 total_epochs = 100
-Batch_size = 2
+
+Batch_size = 16
+
 #Test with 512 at later time
 img_size = 256
 embed_dim = 768
 num_heads = 12
 n_cls = 5
 lrate = 0.0001
-layers = 12
+layers = 8
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -490,8 +510,10 @@ megSeg = MergeSegmentor(embed_dim, num_heads,n_cls=n_cls, n_layers=layers, img_s
 
 #print("seg model output shape:", seg_output.shape)
 
-non_linear_func = torch.nn.functional.softmax
-criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, reduction='sum').to(device)
+
+#non_linear_func = torch.nn.functional.softmax
+#criterion = focal_loss.FocalLoss(n_cls, alpha=0.35, gamma=2, ignore_index=None, reduction='mean').to(device)
+
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([1.0, 1.0, 2.0, 1.0, 0.5])).to(device)
 #Add inverse weights of total data
 #test 1
@@ -499,7 +521,8 @@ criterion = focal_loss.FocalLoss(n_cls, alpha=None, gamma=2, ignore_index=None, 
 #test 2
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 1.5])).to(device)
 #test 4
-# criterion = nn.CrossEntropyLoss(weight=torch.tensor([5, 7, 15.0, 6.5, 2])).to(device)
+criterion = nn.CrossEntropyLoss(ignore_index=4,weight=torch.tensor([5, 7, 15.0, 6.5, 0.1])).to(device)
+#criterion = nn.CrossEntropyLoss(ignore_index=4).to(device)
 #Try this in seperate experiment for added cat 3 weight
 #criterion = nn.CrossEntropyLoss(weight=torch.tensor([8.8, 11.38, 344.82, 10.82, 1.42])).to(device)
 #criterion = nn.CrossEntropyLoss().to(device)
@@ -509,7 +532,7 @@ optimizer = optim.AdamW(list(megSeg.parameters()) + list(model.parameters()), lr
 # optimizer = optim.AdamW(megSeg.parameters(), lr=lrate)
 # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=1, eta_min=1e-8)
 
-lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.5)
+lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
 
 #obtain one hot encoding
@@ -521,4 +544,4 @@ for epoch in range(total_epochs):
         train_one_epoch(epoch, data_loader_train, model, megSeg, criterion, optimizer, device, writer)
         evalidation(epoch, val_loader, model, megSeg, criterion, device, writer, csv_file)
         lr_scheduler.step()
-        torch.save(model.state_dict(), os.path.join("./output/", 'cls_drop_0.3_weighted_inverse_test4_img_256_emd_1024_head_8_epoch_{}.pth'.format(epoch)))
+        torch.save(model.state_dict(), os.path.join("./output/", 'cls_drop_0.3_alpha_0.25_weighted_inverse_test4_img_256_emd_1024_head_8_epoch_{}.pth'.format(epoch)))

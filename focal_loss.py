@@ -72,10 +72,19 @@ class FocalLoss(nn.Module):
 
         # ----------memory saving way--------
         prob = prob.gather(1, target.type(torch.int64)).view(-1) + self.smooth  # avoid nan
+        print("prob")
+        print(prob.shape)
+        print(prob)
         logpt = torch.log(prob)
         # alpha_class = alpha.gather(0, target.view(-1))
         alpha_class = alpha[target.squeeze().long()]
         class_weight = -alpha_class * torch.pow(torch.sub(1.0, prob), self.gamma)
+        print("class_weight")
+        print(class_weight.shape)
+        print(class_weight)
+        print("logpt")
+        print(logpt.shape)
+        print(logpt)
         loss = class_weight * logpt
         if valid_mask is not None:
             loss = loss * valid_mask.squeeze()
